@@ -16,7 +16,9 @@ import {
   Copy,
   PhoneOff,
   MicOff,
-  VideoOff
+  VideoOff,
+  Bell,
+  BellOff
 } from 'lucide-react'
 
 // Types
@@ -50,6 +52,8 @@ interface AppState {
   isVideoOff: boolean
   isMobileView: boolean
   showSidebar: boolean
+  notificationsEnabled: boolean
+  notificationPermission: NotificationPermission | 'unsupported'
 }
 
 // LocalStorage helpers
@@ -70,27 +74,41 @@ const saveMyId = (id: string) => {
   localStorage.setItem('whatsapp_my_id', id)
 }
 
+const getNotificationSettings = (): { enabled: boolean } => {
+  const stored = localStorage.getItem('whatsapp_notifications')
+  return stored ? JSON.parse(stored) : { enabled: true }
+}
+
+const saveNotificationSettings = (enabled: boolean) => {
+  localStorage.setItem('whatsapp_notifications', JSON.stringify({ enabled }))
+}
+
 // Generate random ID
 const generateId = () => {
   return 'wa-' + Math.random().toString(36).substr(2, 9)
 }
 
 function App() {
-  const [state, setState] = useState<AppState>({
-    myId: null,
-    connectedPeerId: null,
-    isConnected: false,
-    conversations: {},
-    activeConversation: null,
-    isVideoCallActive: false,
-    isIncomingCall: false,
-    incomingCallFrom: null,
-    localStream: null,
-    remoteStream: null,
-    isMuted: false,
-    isVideoOff: false,
-    isMobileView: window.innerWidth < 768,
-    showSidebar: true
+  const [state, setState] = useState<AppState>(() => {
+    const notifSettings = getNotificationSettings()
+    return {
+      myId: null,
+      connectedPeerId: null,
+      isConnected: false,
+      conversations: {},
+      activeConversation: null,
+      isVideoCallActive: false,
+      isIncomingCall: false,
+      incomingCallFrom: null,
+      localStream: null,
+      remoteStream: null,
+      isMuted: false,
+      isVideoOff: false,
+      isMobileView: window.innerWidth < 768,
+      showSidebar: true,
+      notificationsEnabled: notifSettings.enabled,
+      notificationPermission: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+    }
   })
 
   const [messageInput, setMessageInput] = useState('')
@@ -253,6 +271,17 @@ function App() {
           messageId: newMessage.id,
           senderId: state.myId
         })
+
+        // Show notification for new message (if not in active conversation)
+        if (state.activeConversation !== peerId) {
+          showNotification(
+            `New message from ${peerId}`,
+            data.text,
+            `msg-${peerId}`
+          )
+          // Also notify service worker
+          sendToServiceWorker(peerId, data.text)
+        }
       } else if (data.type === 'ack') {
         // Update message status
         setState(prev => {
@@ -485,6 +514,78 @@ function App() {
     navigator.clipboard.writeText(url)
     setCopySuccess(true)
     setTimeout(() => setCopySuccess(false), 2000)
+  }
+
+  // Request notification permission
+  const requestNotificationPermission = async () => {
+    if (typeof Notification === 'undefined') {
+      alert('Notifications are not supported in this browser')
+      return
+    }
+
+    if (Notification.permission === 'default') {
+      const permission = await Notification.requestPermission()
+      setState(prev => ({ ...prev, notificationPermission: permission }))
+    }
+
+    if (Notification.permission === 'granted') {
+      setState(prev => ({ ...prev, notificationsEnabled: true }))
+      saveNotificationSettings(true)
+    }
+  }
+
+  // Toggle notifications
+  const toggleNotifications = () => {
+    if (!state.notificationsEnabled && Notification.permission !== 'granted') {
+      requestNotificationPermission()
+    } else {
+      const newEnabled = !state.notificationsEnabled
+      setState(prev => ({ ...prev, notificationsEnabled: newEnabled }))
+      saveNotificationSettings(newEnabled)
+    }
+  }
+
+  // Show local notification
+  const showNotification = (title: string, body: string, tag: string) => {
+    if (!state.notificationsEnabled) return
+
+    // Check if browser supports notifications
+    if (typeof Notification === 'undefined') return
+
+    // Only show if permission is granted
+    if (Notification.permission !== 'granted') return
+
+    // Don't show if app is in focus
+    if (document.hasFocus()) return
+
+    const notification = new Notification(title, {
+      body,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      tag,
+      vibrate: [200, 100, 200]
+    } as NotificationOptions)
+
+    notification.onclick = () => {
+      window.focus()
+      notification.close()
+    }
+
+    // Auto close after 5 seconds
+    setTimeout(() => notification.close(), 5000)
+  }
+
+  // Send message to service worker for background notification
+  const sendToServiceWorker = (senderId: string, text: string) => {
+    if ('serviceWorker' in navigator && state.notificationsEnabled) {
+      navigator.serviceWorker.ready.then((registration) => {
+        registration.active?.postMessage({
+          type: 'NEW_MESSAGE',
+          senderId,
+          text
+        })
+      })
+    }
   }
 
   // Format timestamp
@@ -894,6 +995,22 @@ function App() {
         <div className="bg-[#f0f2f5] px-4 py-3 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800">WhatsApp</h1>
           <div className="flex gap-2">
+            {/* Notification Toggle */}
+            <button
+              onClick={toggleNotifications}
+              className={`p-2 rounded-full transition-colors ${
+                state.notificationsEnabled
+                  ? 'hover:bg-gray-200 text-green-500'
+                  : 'hover:bg-gray-200 text-gray-400'
+              }`}
+              title={state.notificationsEnabled ? 'Notifications on' : 'Notifications off'}
+            >
+              {state.notificationsEnabled ? (
+                <Bell className="w-5 h-5" />
+              ) : (
+                <BellOff className="w-5 h-5" />
+              )}
+            </button>
             <button className="p-2 hover:bg-gray-200 rounded-full transition-colors">
               <MoreVertical className="w-5 h-5 text-gray-600" />
             </button>

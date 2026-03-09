@@ -1,9 +1,10 @@
 // Service Worker for WhatsApp Clone PWA
-const CACHE_NAME = 'whatsapp-clone-v1';
+const CACHE_NAME = 'whatsapp-clone-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/manifest.json'
+  '/manifest.json',
+  '/icon.svg'
 ];
 
 // Install event - cache static assets
@@ -13,7 +14,16 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('[ServiceWorker] Caching static assets');
-        return cache.addAll(STATIC_ASSETS);
+        // Add all assets that exist
+        return Promise.allSettled(
+          STATIC_ASSETS.map(url =>
+            fetch(url).then(response => {
+              if (response.ok) {
+                return cache.put(url, response);
+              }
+            }).catch(() => {})
+          )
+        );
       })
       .then(() => self.skipWaiting())
   );
@@ -38,47 +48,75 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - network first, fallback to cache
 self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
   // Skip PeerJS and external requests
-  const url = new URL(event.request.url);
   if (url.origin !== self.location.origin ||
       url.hostname.includes('peerjs') ||
-      url.hostname.includes('webrtc')) {
+      url.hostname.includes('webrtc') ||
+      url.hostname.includes('0.peerjs.com')) {
     return;
   }
 
+  // Handle navigation requests (HTML pages)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          // Cache the successful response
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+          return response;
+        })
+        .catch(() => {
+          // Return cached index.html for offline
+          return caches.match('/index.html');
+        })
+    );
+    return;
+  }
+
+  // For other requests (CSS, JS, images, etc.)
   event.respondWith(
     caches.match(event.request)
       .then((cachedResponse) => {
         if (cachedResponse) {
+          // Return cached response and update cache in background
+          fetch(event.request)
+            .then((response) => {
+              if (response.ok) {
+                caches.open(CACHE_NAME).then((cache) => {
+                  cache.put(event.request, response);
+                });
+              }
+            })
+            .catch(() => {});
           return cachedResponse;
         }
 
+        // Not in cache, fetch from network
         return fetch(event.request)
           .then((response) => {
-            // Don't cache non-successful responses
-            if (!response || response.status !== 200) {
-              return response;
-            }
-
-            // Clone the response
-            const responseToCache = response.clone();
-
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                cache.put(event.request, responseToCache);
+            // Cache successful responses
+            if (response.ok) {
+              const responseClone = response.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, responseClone);
               });
-
+            }
             return response;
           })
           .catch(() => {
-            // Return offline page for navigation requests
-            if (event.request.mode === 'navigate') {
-              return caches.match('/');
+            // Return appropriate fallback for asset types
+            if (url.pathname.match(/\.(js|css)$/)) {
+              return new Response('', { status: 408 });
             }
           });
       })
@@ -92,10 +130,9 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'WhatsApp',
     body: 'You have a new message',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: '/icon.svg',
+    badge: '/icon.svg',
     tag: 'whatsapp-notification',
-    renotify: true,
     data: {
       url: '/'
     }
@@ -119,21 +156,8 @@ self.addEventListener('push', (event) => {
       icon: data.icon,
       badge: data.badge,
       tag: data.tag,
-      renotify: data.renotify,
       data: data.data,
-      vibrate: [200, 100, 200],
-      actions: [
-        {
-          action: 'reply',
-          title: 'Reply',
-          icon: '/icon-192.png'
-        },
-        {
-          action: 'open',
-          title: 'Open',
-          icon: '/icon-192.png'
-        }
-      ]
+      vibrate: [200, 100, 200]
     })
   );
 });
@@ -143,51 +167,18 @@ self.addEventListener('notificationclick', (event) => {
   console.log('[ServiceWorker] Notification click:', event.action);
   event.notification.close();
 
-  if (event.action === 'reply') {
-    // Handle reply action
-    event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true })
-        .then((clientList) => {
-          for (const client of clientList) {
-            if (client.url === '/' && 'focus' in client) {
-              return client.focus();
-            }
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            return client.focus();
           }
-          return clients.openWindow('/');
-        })
-    );
-  } else {
-    // Default action - open the app
-    event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true })
-        .then((clientList) => {
-          for (const client of clientList) {
-            if (client.url === '/' && 'focus' in client) {
-              return client.focus();
-            }
-          }
-          return clients.openWindow('/');
-        })
-    );
-  }
+        }
+        return clients.openWindow('/');
+      })
+  );
 });
-
-// Background sync for messages
-self.addEventListener('sync', (event) => {
-  console.log('[ServiceWorker] Background sync:', event.tag);
-
-  if (event.tag === 'send-message') {
-    event.waitUntil(
-      // Sync pending messages
-      syncPendingMessages()
-    );
-  }
-});
-
-async function syncPendingMessages() {
-  // Get pending messages from IndexedDB and send them
-  console.log('[ServiceWorker] Syncing pending messages');
-}
 
 // Handle incoming messages while app is in background
 self.addEventListener('message', (event) => {
@@ -199,12 +190,11 @@ self.addEventListener('message', (event) => {
     // Show local notification
     self.registration.showNotification('WhatsApp', {
       body: `${senderId}: ${text}`,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/icon.svg',
+      badge: '/icon.svg',
       tag: 'whatsapp-message',
-      renotify: true,
       data: {
-        url: `/?chat=${senderId}`
+        url: '/'
       }
     });
   }

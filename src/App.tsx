@@ -1000,7 +1000,7 @@ function App() {
       )
     }
 
-    const activeConv = state.conversations[state.activeConversation!]
+    // const activeConv = state.conversations[state.activeConversation!]
 
     return (
       <div className="flex-1 flex flex-col bg-[#efeae2]">
@@ -1030,13 +1030,13 @@ function App() {
             <Video className="w-5 h-5 text-gray-600" />
           </button>
 
-          <button className="p-2 hover:bg-gray-200 rounded-full transition-colors">
+          {/* <button className="p-2 hover:bg-gray-200 rounded-full transition-colors">
             <Phone className="w-5 h-5 text-gray-600" />
           </button>
 
           <button className="p-2 hover:bg-gray-200 rounded-full transition-colors">
             <MoreVertical className="w-5 h-5 text-gray-600" />
-          </button>
+          </button> */}
         </div>
 
         {/* Messages Area */}

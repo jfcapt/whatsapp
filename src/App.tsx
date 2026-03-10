@@ -18,7 +18,10 @@ import {
   MicOff,
   VideoOff,
   Bell,
-  BellOff
+  BellOff,
+  Trash2,
+  Volume2,
+  VolumeX
 } from 'lucide-react'
 
 // Types
@@ -54,6 +57,8 @@ interface AppState {
   showSidebar: boolean
   notificationsEnabled: boolean
   notificationPermission: NotificationPermission | 'unsupported'
+  soundEnabled: boolean
+  showDeleteMenu: string | null
 }
 
 // LocalStorage helpers
@@ -83,6 +88,15 @@ const saveNotificationSettings = (enabled: boolean) => {
   localStorage.setItem('whatsapp_notifications', JSON.stringify({ enabled }))
 }
 
+const getSoundSettings = (): { enabled: boolean } => {
+  const stored = localStorage.getItem('whatsapp_sounds')
+  return stored ? JSON.parse(stored) : { enabled: true }
+}
+
+const saveSoundSettings = (enabled: boolean) => {
+  localStorage.setItem('whatsapp_sounds', JSON.stringify({ enabled }))
+}
+
 // Generate random ID
 const generateId = () => {
   return 'wa-' + Math.random().toString(36).substr(2, 9)
@@ -91,6 +105,7 @@ const generateId = () => {
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const notifSettings = getNotificationSettings()
+    const soundSettings = getSoundSettings()
     return {
       myId: null,
       connectedPeerId: null,
@@ -107,7 +122,9 @@ function App() {
       isMobileView: window.innerWidth < 768,
       showSidebar: true,
       notificationsEnabled: notifSettings.enabled,
-      notificationPermission: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+      notificationPermission: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
+      soundEnabled: soundSettings.enabled,
+      showDeleteMenu: null
     }
   })
 
@@ -121,6 +138,8 @@ function App() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const currentCallRef = useRef<any>(null)
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null)
+  const ringbackRef = useRef<HTMLAudioElement | null>(null)
 
   // Initialize PeerJS
   useEffect(() => {
@@ -160,6 +179,9 @@ function App() {
           isIncomingCall: true,
           incomingCallFrom: call.peer
         }))
+
+        // Play ringtone
+        setTimeout(() => playRingtone(), 100)
 
         // Store call reference
         currentCallRef.current = call
@@ -402,6 +424,9 @@ function App() {
         isVideoCallActive: true
       }))
 
+      // Play ringback tone for caller
+      playRingback()
+
       // Make the call
       const call = peerRef.current?.call(state.connectedPeerId!, stream)
       if (call) {
@@ -586,6 +611,122 @@ function App() {
         })
       })
     }
+  }
+
+  // Play ringtone for incoming call
+  const playRingtone = () => {
+    if (!state.soundEnabled) return
+
+    // Use Web Audio API to generate a ringtone sound
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      oscillator.frequency.value = 440 // A4 note
+      oscillator.type = 'sine'
+      gainNode.gain.value = 0.3
+
+      // Create a pulsing effect
+      const now = audioContext.currentTime
+      gainNode.gain.setValueAtTime(0.3, now)
+      gainNode.gain.setValueAtTime(0, now + 0.5)
+      gainNode.gain.setValueAtTime(0.3, now + 1)
+      gainNode.gain.setValueAtTime(0, now + 1.5)
+      gainNode.gain.setValueAtTime(0.3, now + 2)
+      gainNode.gain.setValueAtTime(0, now + 2.5)
+
+      oscillator.start(now)
+      oscillator.stop(now + 2.5)
+
+      // Repeat for ringing effect
+      const interval = setInterval(() => {
+        if (!state.isIncomingCall) {
+          clearInterval(interval)
+          return
+        }
+        const osc2 = audioContext.createOscillator()
+        const gain2 = audioContext.createGain()
+        osc2.connect(gain2)
+        gain2.connect(audioContext.destination)
+        osc2.frequency.value = 440
+        osc2.type = 'sine'
+        gain2.gain.value = 0.3
+        const t = audioContext.currentTime
+        gain2.gain.setValueAtTime(0.3, t)
+        gain2.gain.setValueAtTime(0, t + 0.5)
+        osc2.start(t)
+        osc2.stop(t + 0.5)
+      }, 2000)
+    } catch (e) {
+      console.log('Audio not supported')
+    }
+  }
+
+  // Play ringback tone for caller
+  const playRingback = () => {
+    if (!state.soundEnabled) return
+
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+
+      const playTone = () => {
+        const oscillator = audioContext.createOscillator()
+        const gainNode = audioContext.createGain()
+
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContext.destination)
+
+        oscillator.frequency.value = 440
+        oscillator.type = 'sine'
+        gainNode.gain.value = 0.2
+
+        const now = audioContext.currentTime
+        gainNode.gain.setValueAtTime(0.2, now)
+        gainNode.gain.setValueAtTime(0, now + 1)
+
+        oscillator.start(now)
+        oscillator.stop(now + 1)
+      }
+
+      // Play ringback pattern
+      playTone()
+      const interval = setInterval(() => {
+        if (!state.isVideoCallActive || state.remoteStream) {
+          clearInterval(interval)
+          return
+        }
+        playTone()
+      }, 2000)
+    } catch (e) {
+      console.log('Audio not supported')
+    }
+  }
+
+  // Toggle sound settings
+  const toggleSound = () => {
+    const newEnabled = !state.soundEnabled
+    setState(prev => ({ ...prev, soundEnabled: newEnabled }))
+    saveSoundSettings(newEnabled)
+  }
+
+  // Delete conversation
+  const deleteConversation = (peerId: string) => {
+    const updatedConversations = { ...state.conversations }
+    delete updatedConversations[peerId]
+    saveConversations(updatedConversations)
+
+    setState(prev => ({
+      ...prev,
+      conversations: updatedConversations,
+      activeConversation: prev.activeConversation === peerId ? null : prev.activeConversation,
+      connectedPeerId: prev.connectedPeerId === peerId ? null : prev.connectedPeerId,
+      isConnected: prev.connectedPeerId === peerId ? false : prev.isConnected,
+      showDeleteMenu: null
+    }))
   }
 
   // Format timestamp
@@ -1011,6 +1152,22 @@ function App() {
                 <BellOff className="w-5 h-5" />
               )}
             </button>
+            {/* Sound Toggle */}
+            <button
+              onClick={toggleSound}
+              className={`p-2 rounded-full transition-colors ${
+                state.soundEnabled
+                  ? 'hover:bg-gray-200 text-green-500'
+                  : 'hover:bg-gray-200 text-gray-400'
+              }`}
+              title={state.soundEnabled ? 'Sound on' : 'Sound off'}
+            >
+              {state.soundEnabled ? (
+                <Volume2 className="w-5 h-5" />
+              ) : (
+                <VolumeX className="w-5 h-5" />
+              )}
+            </button>
             <button className="p-2 hover:bg-gray-200 rounded-full transition-colors">
               <MoreVertical className="w-5 h-5 text-gray-600" />
             </button>
@@ -1054,41 +1211,56 @@ function App() {
             </div>
           ) : (
             conversations.map((conv) => (
-              <button
+              <div
                 key={conv.peerId}
-                onClick={() => {
-                  if (!state.isConnected || state.connectedPeerId !== conv.peerId) {
-                    connectToPeer(conv.peerId)
-                  }
-                  setState(prev => ({
-                    ...prev,
-                    activeConversation: conv.peerId,
-                    connectedPeerId: conv.peerId,
-                    isConnected: true,
-                    showSidebar: !prev.isMobileView
-                  }))
-                }}
-                className={`w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-100 transition-colors ${
-                  state.activeConversation === conv.peerId ? 'bg-gray-100' : ''
-                }`}
+                className={`relative group ${state.activeConversation === conv.peerId ? 'bg-gray-100' : ''}`}
               >
-                <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0">
-                  {conv.peerId.slice(-2).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-semibold text-gray-800 truncate">{conv.peerId}</h3>
-                    {conv.lastMessage && (
-                      <span className="text-xs text-gray-500">
-                        {formatTime(conv.lastMessage.timestamp)}
-                      </span>
-                    )}
+                <button
+                  onClick={() => {
+                    if (!state.isConnected || state.connectedPeerId !== conv.peerId) {
+                      connectToPeer(conv.peerId)
+                    }
+                    setState(prev => ({
+                      ...prev,
+                      activeConversation: conv.peerId,
+                      connectedPeerId: conv.peerId,
+                      isConnected: true,
+                      showSidebar: !prev.isMobileView
+                    }))
+                  }}
+                  className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-100 transition-colors"
+                >
+                  <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0">
+                    {conv.peerId.slice(-2).toUpperCase()}
                   </div>
-                  <p className="text-sm text-gray-500 truncate">
-                    {conv.lastMessage?.text || 'No messages yet'}
-                  </p>
-                </div>
-              </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-semibold text-gray-800 truncate">{conv.peerId}</h3>
+                      {conv.lastMessage && (
+                        <span className="text-xs text-gray-500">
+                          {formatTime(conv.lastMessage.timestamp)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500 truncate">
+                      {conv.lastMessage?.text || 'No messages yet'}
+                    </p>
+                  </div>
+                </button>
+                {/* Delete button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (confirm(`Delete conversation with ${conv.peerId}?`)) {
+                      deleteConversation(conv.peerId)
+                    }
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-red-100 text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                  title="Delete conversation"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
             ))
           )}
         </div>

@@ -10,8 +10,8 @@ import {
   Paperclip,
   Check,
   CheckCheck,
-  X,
-  Menu,
+  // X,
+  // Menu,
   ArrowLeft,
   Copy,
   PhoneOff,
@@ -99,7 +99,11 @@ const saveSoundSettings = (enabled: boolean) => {
 
 // Generate random ID
 const generateId = () => {
-  return 'wa-' + Math.random().toString(36).substr(2, 9)
+  // return 'wa-' + Math.random().toString(36).substr(2, 9)
+  // More robust ID generation using crypto API
+  const array = new Uint32Array(4)
+  window.crypto.getRandomValues(array)
+  return 'wa-' + Array.from(array, dec => dec.toString(36)).join('')
 }
 
 function App() {
@@ -189,6 +193,10 @@ function App() {
 
       peer.on('error', (err) => {
         console.error('Peer error:', err)
+        // Handle specific errors (e.g., ID already taken)
+        if (err.type === 'unavailable-id') {
+          setState(prev => ({ ...prev, myId: null }))
+        }
       })
 
       peerRef.current = peer

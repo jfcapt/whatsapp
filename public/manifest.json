@@ -1,8 +1,8 @@
 {
-  "name": "WhatsApp Clone P2P",
+  "name": "WhatsApp Clone",
   "short_name": "WhatsApp",
   "description": "A peer-to-peer WhatsApp clone with messaging and video calling",
-  "start_url": "/",
+  "start_url": "/whatsapp/",
   "display": "standalone",
   "background_color": "#efeae2",
   "theme_color": "#00a884",

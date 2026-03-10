@@ -58,8 +58,9 @@ self.addEventListener('fetch', (event) => {
   // Skip PeerJS and external requests
   if (url.origin !== self.location.origin ||
       url.hostname.includes('peerjs') ||
-      url.hostname.includes('webrtc') ||
-      url.hostname.includes('0.peerjs.com')) {
+      url.hostname.includes('webrtc')
+      // || url.hostname.includes('0.peerjs.com')
+    ) {
     return;
   }
 

@@ -1,10 +1,10 @@
 // Service Worker for WhatsApp Clone PWA
 const CACHE_NAME = 'whatsapp-clone-v2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg'
+  './',
+  './index.html',
+  './manifest.json',
+  './icon.svg'
 ];
 
 // Install event - cache static assets

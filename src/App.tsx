@@ -59,6 +59,7 @@ interface AppState {
   notificationPermission: NotificationPermission | 'unsupported'
   soundEnabled: boolean
   showDeleteMenu: string | null
+  error: { message: string; peerId?: string } | null
 }
 
 // LocalStorage helpers
@@ -136,7 +137,8 @@ function App() {
       notificationsEnabled: notifSettings.enabled,
       notificationPermission: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
       soundEnabled: soundSettings.enabled,
-      showDeleteMenu: null
+      showDeleteMenu: null,
+      error: null as { message: string; peerId?: string } | null
     }
   })
 
@@ -145,6 +147,7 @@ function App() {
   const [customIdInput, setCustomIdInput] = useState('')
   const [showConnectionModal, setShowConnectionModal] = useState(false)
   const [copySuccess, setCopySuccess] = useState(false)
+  const [connectionRetries, setConnectionRetries] = useState<Record<string, number>>({})
 
   const peerRef = useRef<Peer | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -231,7 +234,17 @@ function App() {
     const storedConversations = getStoredConversations()
     setState(prev => ({ ...prev, conversations: storedConversations }))
 
-    initPeer()
+    // Initialize peer connection
+    let timeoutId: NodeJS.Timeout
+    try {
+      initPeer()
+    } catch (error) {
+      console.error('Failed to initialize peer:', error)
+      // Retry after a delay
+      timeoutId = setTimeout(() => {
+        initPeer()
+      }, 2000)
+    }
 
     // Handle resize
     const handleResize = () => {
@@ -245,10 +258,12 @@ function App() {
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      if (timeoutId) clearTimeout(timeoutId)
       if (peerRef.current) {
         peerRef.current.destroy()
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Auto-scroll to bottom when messages change
@@ -256,17 +271,47 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [state.conversations, state.activeConversation])
 
-  // Connect to peer
-  const connectToPeer = (peerId: string, peer?: Peer) => {
-    const p = peer || peerRef.current
-    if (!p || !peerId) return
+  // Show local notification
+  const showNotification = (title: string, body: string, tag: string) => {
+    if (!state.notificationsEnabled) return
 
-    console.log('Connecting to:', peerId)
-    const conn = p.connect(peerId, {
-      reliable: true
-    })
+    // Check if browser supports notifications
+    if (typeof Notification === 'undefined') return
 
-    setupConnection(peerId, conn)
+    // Only show if permission is granted
+    if (Notification.permission !== 'granted') return
+
+    // Don't show if app is in focus
+    if (document.hasFocus()) return
+
+    const notification = new Notification(title, {
+      body,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      tag,
+      vibrate: [200, 100, 200]
+    } as NotificationOptions)
+
+    notification.onclick = () => {
+      window.focus()
+      notification.close()
+    }
+
+    // Auto close after 5 seconds
+    setTimeout(() => notification.close(), 5000)
+  }
+
+  // Send message to service worker for background notification
+  const sendToServiceWorker = (senderId: string, text: string) => {
+    if ('serviceWorker' in navigator && state.notificationsEnabled) {
+      navigator.serviceWorker.ready.then((registration) => {
+        registration.active?.postMessage({
+          type: 'NEW_MESSAGE',
+          senderId,
+          text
+        })
+      })
+    }
   }
 
   // Setup connection handlers
@@ -278,8 +323,14 @@ function App() {
         connectedPeerId: peerId,
         isConnected: true,
         activeConversation: peerId,
-        showSidebar: !prev.isMobileView
+        showSidebar: !prev.isMobileView,
+        error: null
       }))
+      setConnectionRetries(prev => {
+        const newRetries = { ...prev }
+        delete newRetries[peerId]
+        return newRetries
+      })
     })
 
     conn.on('data', (data: any) => {
@@ -366,7 +417,39 @@ function App() {
 
     conn.on('error', (err: any) => {
       console.error('Connection error:', err)
+      const errorMessage = err.message || err.type || 'Unknown connection error'
+      setState(prev => ({
+        ...prev,
+        error: {
+          message: `Could not connect to ${peerId}: ${errorMessage}. The peer may be offline or not available.`,
+          peerId
+        },
+        isConnected: false
+      }))
     })
+  }
+
+  // Connect to peer
+  const connectToPeer = (peerId: string, peer?: Peer) => {
+    const p = peer || peerRef.current
+    if (!p || !peerId) return
+
+    console.log('Connecting to:', peerId)
+    setState(prev => ({ ...prev, error: null }))
+    const conn = p.connect(peerId, {
+      reliable: true
+    })
+
+    setupConnection(peerId, conn)
+  }
+
+  // Retry connection
+  const retryConnection = (peerId: string) => {
+    setConnectionRetries(prev => ({
+      ...prev,
+      [peerId]: (prev[peerId] || 0) + 1
+    }))
+    connectToPeer(peerId)
   }
 
   // Send message
@@ -600,49 +683,6 @@ function App() {
       const newEnabled = !state.notificationsEnabled
       setState(prev => ({ ...prev, notificationsEnabled: newEnabled }))
       saveNotificationSettings(newEnabled)
-    }
-  }
-
-  // Show local notification
-  const showNotification = (title: string, body: string, tag: string) => {
-    if (!state.notificationsEnabled) return
-
-    // Check if browser supports notifications
-    if (typeof Notification === 'undefined') return
-
-    // Only show if permission is granted
-    if (Notification.permission !== 'granted') return
-
-    // Don't show if app is in focus
-    if (document.hasFocus()) return
-
-    const notification = new Notification(title, {
-      body,
-      icon: '/icon.svg',
-      badge: '/icon.svg',
-      tag,
-      vibrate: [200, 100, 200]
-    } as NotificationOptions)
-
-    notification.onclick = () => {
-      window.focus()
-      notification.close()
-    }
-
-    // Auto close after 5 seconds
-    setTimeout(() => notification.close(), 5000)
-  }
-
-  // Send message to service worker for background notification
-  const sendToServiceWorker = (senderId: string, text: string) => {
-    if ('serviceWorker' in navigator && state.notificationsEnabled) {
-      navigator.serviceWorker.ready.then((registration) => {
-        registration.active?.postMessage({
-          type: 'NEW_MESSAGE',
-          senderId,
-          text
-        })
-      })
     }
   }
 
@@ -1341,6 +1381,44 @@ function App() {
     )
   }
 
+  // Render error alert
+  const renderErrorAlert = () => {
+    if (!state.error) return null
+
+    return (
+      <div className="fixed top-4 right-4 bg-red-500 text-white rounded-lg shadow-lg p-4 max-w-sm z-40 animate-pulse">
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <p className="font-semibold">Connection Error</p>
+            <p className="text-sm mt-1">{state.error.message}</p>
+          </div>
+          <button
+            onClick={() => setState(prev => ({ ...prev, error: null }))}
+            className="text-white hover:text-red-100 text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+        {state.error.peerId && (
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => retryConnection(state.error!.peerId!)}
+              className="flex-1 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm font-medium transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => setState(prev => ({ ...prev, error: null }))}
+              className="flex-1 px-3 py-1 bg-red-600/50 hover:bg-red-600 rounded text-sm font-medium transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="h-screen flex bg-[#d1d7db]">
       {/* Sidebar */}
@@ -1355,6 +1433,7 @@ function App() {
       {renderConnectionModal()}
       {renderIncomingCallModal()}
       {renderVideoCall()}
+      {renderErrorAlert()}
     </div>
   )
 }

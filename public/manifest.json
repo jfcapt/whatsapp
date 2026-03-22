@@ -16,12 +16,5 @@
     }
   ],
   "categories": ["social", "communication"],
-  "shortcuts": [
-    {
-      "name": "New Chat",
-      "short_name": "Chat",
-      "description": "Start a new chat",
-      "url": "./?action=new-chat"
-    }
-  ]
+  "lang": "en-US"
 }

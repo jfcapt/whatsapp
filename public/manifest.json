@@ -21,7 +21,7 @@
       "name": "New Chat",
       "short_name": "Chat",
       "description": "Start a new chat",
-      "url": "/?action=new-chat"
+      "url": "./?action=new-chat"
     }
   ]
 }

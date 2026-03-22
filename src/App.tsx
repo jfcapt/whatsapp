@@ -143,7 +143,7 @@ function App() {
 
   // Initialize PeerJS
   useEffect(() => {
-    const initPeer = () => {
+    const initPeer = (retryCount = 0) => {
       const storedMyId = getMyId()
       const myId = storedMyId || generateId()
       if (!storedMyId) saveMyId(myId)
@@ -189,11 +189,25 @@ function App() {
 
       peer.on('error', (err) => {
         console.error('Peer error:', err)
-        localStorage.removeItem('whatsapp_my_id')
-        // // Handle specific errors (e.g., ID already taken)
-        // if (err.type === 'unavailable-id') {
-        //   setState(prev => ({ ...prev, myId: null }))
-        // }
+        
+        // Handle ID already taken error - retry with a new ID
+        if (err.type === 'unavailable-id' || err.message.includes('is taken')) {
+          console.log('ID is taken, generating a new one...')
+          localStorage.removeItem('whatsapp_my_id')
+          peer.destroy()
+          
+          // Retry with a new ID (with max 5 retries to prevent infinite loops)
+          if (retryCount < 5) {
+            setTimeout(() => {
+              initPeer(retryCount + 1)
+            }, 500)
+          } else {
+            console.error('Failed to initialize peer after multiple retries')
+            alert('Failed to initialize connection. Please refresh the page.')
+          }
+        } else {
+          console.error('Unhandled peer error:', err)
+        }
       })
 
       peerRef.current = peer

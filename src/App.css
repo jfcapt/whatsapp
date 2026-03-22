@@ -31,6 +31,14 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+.safe-area-left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-area-right {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -113,7 +121,7 @@ body {
 }
 
 /* PWA install banner hide */
-@media display-mode: standalone {
+@media (display-mode: standalone) {
   html, body, #root {
     height: 100dvh;
   }

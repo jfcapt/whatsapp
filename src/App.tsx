@@ -97,6 +97,18 @@ const saveSoundSettings = (enabled: boolean) => {
   localStorage.setItem('whatsapp_sounds', JSON.stringify({ enabled }))
 }
 
+const saveCustomIdSetting = (customId: string) => {
+  localStorage.setItem('whatsapp_custom_id', customId)
+}
+
+const getCustomIdSetting = (): string | null => {
+  return localStorage.getItem('whatsapp_custom_id')
+}
+
+const clearCustomIdSetting = () => {
+  localStorage.removeItem('whatsapp_custom_id')
+}
+
 // Generate random ID
 const generateId = () => {
   return 'wa-' + Math.random().toString(36).substr(2, 9)
@@ -130,6 +142,7 @@ function App() {
 
   const [messageInput, setMessageInput] = useState('')
   const [peerIdInput, setPeerIdInput] = useState('')
+  const [customIdInput, setCustomIdInput] = useState('')
   const [showConnectionModal, setShowConnectionModal] = useState(false)
   const [copySuccess, setCopySuccess] = useState(false)
 
@@ -145,7 +158,8 @@ function App() {
   useEffect(() => {
     const initPeer = (retryCount = 0) => {
       const storedMyId = getMyId()
-      const myId = storedMyId || generateId()
+      const customId = getCustomIdSetting()
+      const myId = storedMyId || customId || generateId()
       if (!storedMyId) saveMyId(myId)
 
       const peer = new Peer(myId, {
@@ -912,10 +926,46 @@ function App() {
   const renderConnectionModal = () => {
     if (!showConnectionModal) return null
 
+    const hasCustomId = state.myId && !state.myId.startsWith('wa-')
+
     return (
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl p-6 max-w-md w-full">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Connect with Someone</h2>
+
+          {!hasCustomId && (
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Set Custom ID (Optional)
+              </label>
+              <p className="text-xs text-gray-500 mb-2">Create a friendly ID (e.g., alice, john) instead of a random one</p>
+              <input
+                type="text"
+                value={customIdInput}
+                onChange={(e) => setCustomIdInput(e.target.value.trim().toLowerCase())}
+                placeholder="e.g., alice, john, dev"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent mb-2"
+              />
+              {customIdInput && (
+                <button
+                  onClick={() => {
+                    if (customIdInput.length > 0) {
+                      saveCustomIdSetting(customIdInput)
+                      // Regenerate peer with new custom ID
+                      peerRef.current?.destroy()
+                      localStorage.removeItem('whatsapp_my_id')
+                      setCustomIdInput('')
+                      // Reload to reinitialize with custom ID
+                      window.location.reload()
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium transition-colors mb-4"
+                >
+                  Set Custom ID
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -939,6 +989,18 @@ function App() {
             <p className="text-xs text-gray-500 mt-2">
               Share this ID or link with someone to start chatting
             </p>
+            {hasCustomId && (
+              <button
+                onClick={() => {
+                  clearCustomIdSetting()
+                  localStorage.removeItem('whatsapp_my_id')
+                  window.location.reload()
+                }}
+                className="w-full mt-2 px-3 py-1 text-xs text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                Reset to Random ID
+              </button>
+            )}
           </div>
 
           <div className="mb-6">

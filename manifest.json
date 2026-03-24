@@ -1,0 +1,20 @@
+{
+  "name": "WhatsApp Clone",
+  "short_name": "WhatsApp",
+  "description": "A peer-to-peer WhatsApp clone with messaging and video calling",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#efeae2",
+  "theme_color": "#00a884",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["social", "communication"],
+  "lang": "en-US"
+}
